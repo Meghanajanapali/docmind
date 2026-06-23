@@ -1,0 +1,9 @@
+/* Global reset only — the app's actual theme lives in App.css */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
