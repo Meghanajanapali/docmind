@@ -8,5 +8,5 @@ passlib[bcrypt]
 python-multipart
 python-dotenv
 sentence-transformers
-chromadb
+qdrant-client
 groq

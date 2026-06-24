@@ -28,7 +28,9 @@ from groq import Groq
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 import uuid
 
-from embedding import model, collection
+from embedding import model, client as qdrant_client, COLLECTION_NAME
+from qdrant_client.models import Filter, FieldCondition, MatchValue, PointStruct
+import uuid as uuid_lib
 from database import SessionLocal, engine
 from models import Base, Note, User, Chat, ChatSession, SessionDocument
 
@@ -327,18 +329,22 @@ async def upload_pdf(
     for index, (chunk, page_num) in enumerate(all_chunks):
 
         embedding = model.encode(chunk).tolist()
+        point_id = str(uuid_lib.uuid4())
 
-        collection.add(
-            documents=[chunk],
-            embeddings=[embedding],
-            ids=[f"{file.filename}_{index}_{uuid.uuid4()}"],
-            metadatas=[{
-                "filename": file.filename,
-                "chunk_number": index,
-                "page_number": page_num,
-                "document_id": file.filename,
-                "user_id": user["user_id"]
-            }]
+        qdrant_client.upsert(
+            collection_name=COLLECTION_NAME,
+            points=[PointStruct(
+                id=point_id,
+                vector=embedding,
+                payload={
+                    "text": chunk,
+                    "filename": file.filename,
+                    "chunk_number": index,
+                    "page_number": page_num,
+                    "document_id": file.filename,
+                    "user_id": int(user["user_id"])
+                }
+            )]
         )
 
     # Link this document to the session if one was provided
@@ -399,52 +405,40 @@ def ask_ai(
 
     embedding = model.encode(question).tolist()
 
-    where_filter = {
-        "user_id": user["user_id"]
-    }
-
-    if document:
-        where_filter = {
-            "$and": [
-                {
-                    "user_id": user["user_id"]
-                },
-                {
-                    "document_id": document
-                }
-            ]
-        }
-
     context = ""
     sources = []
-
-    RELEVANCE_THRESHOLD = 1.2
+    RELEVANCE_THRESHOLD = 0.3  # Qdrant cosine: higher = more similar (1.0 max)
 
     try:
-        results = collection.query(
-            query_embeddings=[embedding],
-            n_results=3,
-            include=["documents", "metadatas", "distances"],
-            where=where_filter
-        )
+        must_conditions = [
+            FieldCondition(key="user_id", match=MatchValue(value=int(user["user_id"])))
+        ]
 
-        if results["documents"] and results["documents"][0]:
-            for doc, meta, dist in zip(
-                results["documents"][0],
-                results["metadatas"][0],
-                results["distances"][0]
-            ):
-                if dist <= RELEVANCE_THRESHOLD:
-                    context += doc + "\n"
-                    if meta:
-                        fname = meta.get('filename', '')
-                        page = meta.get('page_number')
-                        entry = f"{fname}, page {page}" if page else fname
-                        if entry not in sources:
-                            sources.append(entry)
+        if document:
+            must_conditions.append(
+                FieldCondition(key="document_id", match=MatchValue(value=document))
+            )
+
+        results = qdrant_client.query_points(
+            collection_name=COLLECTION_NAME,
+            query=embedding,
+            query_filter=Filter(must=must_conditions),
+            limit=5,
+            with_payload=True,
+            score_threshold=0.1
+        ).points
+
+        for hit in results:
+            payload = hit.payload
+            text = payload.get("text", "")
+            context += text + "\n"
+            fname = payload.get("filename", "")
+            page = payload.get("page_number")
+            entry = f"{fname}, page {page}" if page else fname
+            if entry not in sources:
+                sources.append(entry)
 
     except Exception:
-        # Collection is empty or no documents match — proceed without context
         pass
 
     prompt = f"""You are a helpful AI assistant inside a personal document assistant app.
@@ -651,88 +645,49 @@ def login(
 
 @app.get("/documents")
 def get_documents(
-
-    user=Depends(
-
-        get_current_user
-
-    )
-
+    user=Depends(get_current_user)
 ):
 
-    results = collection.get(
+    try:
+        results = qdrant_client.scroll(
+            collection_name=COLLECTION_NAME,
+            scroll_filter=Filter(must=[
+                FieldCondition(key="user_id", match=MatchValue(value=int(user["user_id"])))
+            ]),
+            with_payload=True,
+            limit=1000
+        )
 
-        include=["metadatas"]
+        docs = set()
+        for point in results[0]:
+            fname = point.payload.get("filename")
+            if fname:
+                docs.add(fname)
 
-    )
+        return list(docs)
 
-    docs = set()
-
-    for meta in results["metadatas"]:
-
-        if meta and meta["user_id"] == user["user_id"]:
-
-            docs.add(
-
-                meta["filename"]
-
-            )
-
-    return list(docs)
+    except Exception:
+        return []
 
 
 @app.delete("/documents/{filename}")
 def delete_document(
-
     filename: str,
-
-    user=Depends(
-
-        get_current_user
-
-    )
-
+    user=Depends(get_current_user)
 ):
 
-    results = collection.get(
-
-        where={
-
-            "$and":[
-
-                {
-
-                    "filename": filename
-
-                },
-
-                {
-
-                    "user_id": user["user_id"]
-
-                }
-
-            ]
-
-        }
-
-    )
-
-    ids = results["ids"]
-
-    if ids:
-
-        collection.delete(
-
-            ids=ids
-
+    try:
+        qdrant_client.delete(
+            collection_name=COLLECTION_NAME,
+            points_selector=Filter(must=[
+                FieldCondition(key="filename", match=MatchValue(value=filename)),
+                FieldCondition(key="user_id", match=MatchValue(value=int(user["user_id"])))
+            ])
         )
+    except Exception:
+        pass
 
-    return {
-
-        "message":"Deleted"
-
-    }
+    return {"message": "Deleted"}
 
 
 @app.post("/chat-sessions")
@@ -927,17 +882,22 @@ def dashboard(
             Chat.user_id == user["user_id"]
         ).count()
 
-        results = collection.get(
-            include=["metadatas"]
-        )
-
-        documents = set()
-
-        for meta in results["metadatas"]:
-
-            if meta and meta.get("user_id") == user["user_id"]:
-
-                documents.add(meta["filename"])
+        try:
+            results = qdrant_client.scroll(
+                collection_name=COLLECTION_NAME,
+                scroll_filter=Filter(must=[
+                    FieldCondition(key="user_id", match=MatchValue(value=int(user["user_id"])))
+                ]),
+                with_payload=True,
+                limit=1000
+            )
+            documents = set()
+            for point in results[0]:
+                fname = point.payload.get("filename")
+                if fname:
+                    documents.add(fname)
+        except Exception:
+            documents = set()
 
         return {
             "notes": notes_count,
@@ -997,74 +957,71 @@ def ask_ai_stream(
 
     embedding = model.encode(question).tolist()
 
-    # Build filter: if session has specific docs, restrict to them;
-    # otherwise search across all of the user's documents
-    if session_filenames:
-        if len(session_filenames) == 1:
-            where_filter = {
-                "$and": [
-                    {"user_id": user["user_id"]},
-                    {"document_id": session_filenames[0]}
-                ]
-            }
-        else:
-            where_filter = {
-                "$and": [
-                    {"user_id": user["user_id"]},
-                    {"document_id": {"$in": session_filenames}}
-                ]
-            }
-    else:
-        where_filter = {"user_id": user["user_id"]}
-
     context = ""
     sources = []
 
-    # Distance threshold: ChromaDB uses L2 distance by default.
-    # Scores below 1.0 are genuinely relevant; above 1.5 are noise.
-    RELEVANCE_THRESHOLD = 1.2
+    # Cosine similarity threshold — chunks scoring below this
+    # are not relevant enough to use as context.
+    # 0.45 filters noise while keeping genuinely relevant chunks.
+    RELEVANCE_THRESHOLD = 0.45
 
     try:
-        results = collection.query(
-            query_embeddings=[embedding],
-            n_results=3,
-            include=["documents", "metadatas", "distances"],
-            where=where_filter
-        )
+        must_conditions = [
+            FieldCondition(key="user_id", match=MatchValue(value=int(user["user_id"])))
+        ]
 
-        if results["documents"] and results["documents"][0]:
-            for doc, meta, dist in zip(
-                results["documents"][0],
-                results["metadatas"][0],
-                results["distances"][0]
-            ):
-                if dist <= RELEVANCE_THRESHOLD:
-                    context += doc + "\n"
-                    if meta:
-                        fname = meta.get('filename', '')
-                        page = meta.get('page_number')
-                        entry = f"{fname}, page {page}" if page else fname
-                        if entry not in sources:
-                            sources.append(entry)
+        if session_filenames:
+            from qdrant_client.models import MatchAny
+            must_conditions.append(
+                FieldCondition(
+                    key="document_id",
+                    match=MatchAny(any=session_filenames)
+                )
+            )
 
-    except Exception:
-        pass
+        results = qdrant_client.query_points(
+            collection_name=COLLECTION_NAME,
+            query=embedding,
+            query_filter=Filter(must=must_conditions),
+            limit=5,
+            with_payload=True,
+            score_threshold=RELEVANCE_THRESHOLD
+        ).points
+
+        print(f"[DEBUG] Hits above {RELEVANCE_THRESHOLD}: {len(results)}")
+        for hit in results:
+            print(f"[DEBUG] score={hit.score:.4f} file={hit.payload.get('filename')} page={hit.payload.get('page_number')}")
+
+        for hit in results:
+            payload = hit.payload
+            text = payload.get("text", "")
+            context += text + "\n"
+            fname = payload.get("filename", "")
+            page = payload.get("page_number")
+            entry = f"{fname}, page {page}" if page else fname
+            if entry not in sources:
+                sources.append(entry)
+
+    except Exception as e:
+        print(f"[DEBUG] Qdrant error: {type(e).__name__}: {e}")
+
+    print(f"[DEBUG] context length: {len(context)}, sources: {sources}")
 
     system_prompt = f"""You are DocMind, a helpful AI assistant inside a personal document assistant app.
 
-The user may ask general conversational questions (greetings, small talk, general
-knowledge) or questions about their uploaded documents.
+The user may ask general conversational questions or questions about their uploaded documents.
 
-If the context below is relevant to the question, use it to give an accurate,
-well-explained answer in your own words. Do not copy sentences directly from the
-context — synthesize the information into a coherent, well-structured answer.
-Use markdown formatting where it improves clarity (bullet points, bold, code blocks).
+If context is provided below, check if it is DIRECTLY relevant to the question:
+- If YES, use it to answer and start your response with [USED_CONTEXT]
+- If NO, ignore it completely, answer from general knowledge, and start your response with [GENERAL]
 
-If the context is empty or not relevant, ignore it and respond naturally as a
-helpful conversational assistant.
+Rules:
+- Never copy context directly — synthesize in your own words
+- Use markdown formatting where helpful
+- For greetings or small talk, always use [GENERAL]
 
 Context:
-{context if context else "(no relevant document content found)"}"""
+{context if context else "(none)"}"""
 
     # Build messages list with conversation history for memory
     messages_for_llm = [{"role": "system", "content": system_prompt}]
@@ -1078,6 +1035,7 @@ Context:
 
     def generate():
         full_answer = ""
+        used_context = False
 
         try:
             stream = groq_client.chat.completions.create(
@@ -1091,14 +1049,24 @@ Context:
                 token = chunk.choices[0].delta.content or ""
                 if token:
                     full_answer += token
-                    yield f"data: {token}\n\n"
+
+            # Check if model used context, then strip the tag
+            if full_answer.startswith("[USED_CONTEXT]"):
+                used_context = True
+                full_answer = full_answer[len("[USED_CONTEXT]"):].lstrip()
+            elif full_answer.startswith("[GENERAL]"):
+                full_answer = full_answer[len("[GENERAL]"):].lstrip()
+
+            # Stream the cleaned answer token by token
+            for char in full_answer:
+                yield f"data: {char}\n\n"
 
         except Exception:
             yield "data: Sorry, the language model is unavailable right now.\n\n"
             return
 
-        # Send sources after the answer
-        if sources:
+        # Only show sources if model confirmed it used the context
+        if used_context and sources:
             yield f"data: [SOURCES]{chr(10).join(sources)}\n\n"
 
         yield "data: [DONE]\n\n"
