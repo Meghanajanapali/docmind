@@ -6,9 +6,13 @@ from qdrant_client.models import Distance, VectorParams
 
 load_dotenv()
 
-# Embedding model — produces 768-dimensional vectors
-model = SentenceTransformer("all-mpnet-base-v2")
-VECTOR_SIZE = 768
+# Using all-MiniLM-L6-v2 (90MB) instead of all-mpnet-base-v2 (420MB)
+# to stay within Render free tier's 512MB RAM limit.
+# Produces 384-dimensional vectors.
+# BAAI/bge-small-en-v1.5 — 90MB, 384-dim vectors, slightly better than
+# MiniLM while staying within Render free tier's 512MB RAM limit.
+model = SentenceTransformer("BAAI/bge-small-en-v1.5")
+VECTOR_SIZE = 384
 COLLECTION_NAME = "docmind"
 
 import warnings

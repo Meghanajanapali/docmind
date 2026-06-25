@@ -391,34 +391,17 @@ function App() {
         { headers: getAuthHeaders() }
       )
 
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let fullText = ""
+      const data = await res.json()
+      const answer = data.answer || "No answer"
+      const sourcesText = data.sources?.length > 0
+        ? `\n\n📄 Sources:\n${data.sources.join("\n")}`
+        : ""
 
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        const chunk = decoder.decode(value, { stream: true })
-        const lines = chunk.split("\n")
-
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue
-          const token = line.slice(6)
-          if (token === "[DONE]") break
-          if (token.startsWith("[SOURCES]")) {
-            const sources = token.slice(9)
-            if (sources) fullText += `\n\n📄 Sources:\n${sources}`
-          } else {
-            fullText += token
-          }
-          setMessages(prev => {
-            const updated = [...prev]
-            updated[updated.length - 1] = { role: "ai", text: fullText }
-            return updated
-          })
-        }
-      }
+      setMessages(prev => {
+        const updated = [...prev]
+        updated[updated.length - 1] = { role: "ai", text: answer + sourcesText }
+        return updated
+      })
 
       const updated = await fetchSessions()
       setSessions(updated)

@@ -504,9 +504,6 @@ Answer:"""
                 title = title[:40].rstrip() + "..."
             session.title = title or "New Chat"
 
-        if session and document:
-            session.active_document = document
-
         db.commit()
 
     finally:
@@ -911,7 +908,7 @@ def dashboard(
 
 
 # -----------------------------------
-# STREAMING ASK
+# ASK (SIMPLE, RELIABLE)
 # -----------------------------------
 
 @app.get("/ask/stream")
@@ -935,7 +932,6 @@ def ask_ai_stream(
                 detail="Chat session not found"
             )
 
-        # Get all documents linked to this session
         session_docs = db.query(SessionDocument).filter(
             SessionDocument.session_id == session_id,
             SessionDocument.user_id == user["user_id"]
@@ -943,13 +939,11 @@ def ask_ai_stream(
 
         session_filenames = [d.filename for d in session_docs]
 
-        # Fetch last 4 Q&A pairs for conversation memory
         recent_chats = db.query(Chat).filter(
             Chat.session_id == session_id,
             Chat.user_id == user["user_id"]
         ).order_by(Chat.id.desc()).limit(4).all()
 
-        # Reverse so oldest is first
         recent_chats = list(reversed(recent_chats))
 
     finally:
@@ -959,11 +953,7 @@ def ask_ai_stream(
 
     context = ""
     sources = []
-
-    # Cosine similarity threshold — chunks scoring below this
-    # are not relevant enough to use as context.
-    # 0.45 filters noise while keeping genuinely relevant chunks.
-    RELEVANCE_THRESHOLD = 0.45
+    RELEVANCE_THRESHOLD = 0.65
 
     try:
         must_conditions = [
@@ -988,14 +978,13 @@ def ask_ai_stream(
             score_threshold=RELEVANCE_THRESHOLD
         ).points
 
-        print(f"[DEBUG] Hits above {RELEVANCE_THRESHOLD}: {len(results)}")
-        for hit in results:
-            print(f"[DEBUG] score={hit.score:.4f} file={hit.payload.get('filename')} page={hit.payload.get('page_number')}")
+        # print(f"[DEBUG] Hits: {len(results)}")
+        # for hit in results:
+        #     print(f"[DEBUG] score={hit.score:.4f} file={hit.payload.get('filename')} page={hit.payload.get('page_number')}")
 
         for hit in results:
             payload = hit.payload
-            text = payload.get("text", "")
-            context += text + "\n"
+            context += payload.get("text", "") + "\n"
             fname = payload.get("filename", "")
             page = payload.get("page_number")
             entry = f"{fname}, page {page}" if page else fname
@@ -1003,99 +992,66 @@ def ask_ai_stream(
                 sources.append(entry)
 
     except Exception as e:
-        print(f"[DEBUG] Qdrant error: {type(e).__name__}: {e}")
-
-    print(f"[DEBUG] context length: {len(context)}, sources: {sources}")
+        print(f"[DEBUG] Qdrant error: {e}")
 
     system_prompt = f"""You are DocMind, a helpful AI assistant inside a personal document assistant app.
 
-The user may ask general conversational questions or questions about their uploaded documents.
+The user may ask general questions or questions about their uploaded documents.
 
-If context is provided below, check if it is DIRECTLY relevant to the question:
-- If YES, use it to answer and start your response with [USED_CONTEXT]
-- If NO, ignore it completely, answer from general knowledge, and start your response with [GENERAL]
+{"Use the following context from the user's documents to answer the question. Synthesize the information in your own words — do not copy directly." if context else "Answer from your general knowledge."}
 
-Rules:
-- Never copy context directly — synthesize in your own words
-- Use markdown formatting where helpful
-- For greetings or small talk, always use [GENERAL]
+{"Context:" + chr(10) + context if context else ""}
 
-Context:
-{context if context else "(none)"}"""
+Use markdown formatting where helpful. Be concise and accurate."""
 
-    # Build messages list with conversation history for memory
     messages_for_llm = [{"role": "system", "content": system_prompt}]
 
     for chat in recent_chats:
         messages_for_llm.append({"role": "user", "content": chat.question})
         messages_for_llm.append({"role": "assistant", "content": chat.answer})
 
-    # Add the current question
     messages_for_llm.append({"role": "user", "content": question})
 
-    def generate():
-        full_answer = ""
-        used_context = False
+    try:
+        response = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=messages_for_llm,
+            max_tokens=1024
+        )
+        full_answer = response.choices[0].message.content or ""
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"LLM unavailable: {e}")
 
-        try:
-            stream = groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=messages_for_llm,
-                max_tokens=1024,
-                stream=True
-            )
+    # Show sources only if we actually found relevant chunks
+    final_sources = sources if sources else []
 
-            for chunk in stream:
-                token = chunk.choices[0].delta.content or ""
-                if token:
-                    full_answer += token
+    # Save to DB
+    db = SessionLocal()
+    try:
+        chat = Chat(
+            user_id=user["user_id"],
+            session_id=session_id,
+            question=question,
+            answer=full_answer
+        )
+        db.add(chat)
 
-            # Check if model used context, then strip the tag
-            if full_answer.startswith("[USED_CONTEXT]"):
-                used_context = True
-                full_answer = full_answer[len("[USED_CONTEXT]"):].lstrip()
-            elif full_answer.startswith("[GENERAL]"):
-                full_answer = full_answer[len("[GENERAL]"):].lstrip()
+        sess = db.query(ChatSession).filter(
+            ChatSession.id == session_id
+        ).first()
 
-            # Stream the cleaned answer token by token
-            for char in full_answer:
-                yield f"data: {char}\n\n"
+        if sess and sess.title == "New Chat":
+            title = question.strip()
+            sess.title = (title[:40].rstrip() + "...") if len(title) > 40 else title or "New Chat"
 
-        except Exception:
-            yield "data: Sorry, the language model is unavailable right now.\n\n"
-            return
+        db.commit()
+    finally:
+        db.close()
 
-        # Only show sources if model confirmed it used the context
-        if used_context and sources:
-            yield f"data: [SOURCES]{chr(10).join(sources)}\n\n"
-
-        yield "data: [DONE]\n\n"
-
-        # Save to DB after streaming completes
-        db = SessionLocal()
-        try:
-            chat = Chat(
-                user_id=user["user_id"],
-                session_id=session_id,
-                question=question,
-                answer=full_answer
-            )
-            db.add(chat)
-
-            sess = db.query(ChatSession).filter(
-                ChatSession.id == session_id
-            ).first()
-
-            if sess:
-                if sess.title == "New Chat":
-                    title = question.strip()
-                    sess.title = (title[:40].rstrip() + "...") if len(title) > 40 else title or "New Chat"
-
-            db.commit()
-        finally:
-            db.close()
-
-    return StreamingResponse(generate(), media_type="text/event-stream")
+    return {
+        "answer": full_answer,
+        "sources": final_sources
+    }
 
 
 # -----------------------------------
