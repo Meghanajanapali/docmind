@@ -21,14 +21,14 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from pypdf import PdfReader
 from jose import jwt, JWTError
-from passlib.context import CryptContext
+import bcrypt
 
 from groq import Groq
 
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 import uuid
 
-from embedding import get_model, client as qdrant_client, COLLECTION_NAME
+from embedding import model, client as qdrant_client, COLLECTION_NAME
 from qdrant_client.models import Filter, FieldCondition, MatchValue, PointStruct
 import uuid as uuid_lib
 from database import SessionLocal, engine
@@ -62,10 +62,11 @@ if not SECRET_KEY:
         "and set SECRET_KEY there."
     )
 
-pwd_context = CryptContext(
-    schemes=["bcrypt"],
-    deprecated="auto"
-)
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+def verify_password(password: str, hashed: str) -> bool:
+    return bcrypt.checkpw(password.encode(), hashed.encode())
 
 
 # -----------------------------------
@@ -328,7 +329,7 @@ async def upload_pdf(
 
     for index, (chunk, page_num) in enumerate(all_chunks):
 
-        embedding = get_model().model.encode(chunk).tolist()
+        embedding = model.encode(chunk).tolist()
         point_id = str(uuid_lib.uuid4())
 
         qdrant_client.upsert(
@@ -403,7 +404,7 @@ def ask_ai(
     finally:
         db.close()
 
-    embedding = get_model().model.encode(question).tolist()
+    embedding = model.encode(question).tolist()
 
     context = ""
     sources = []
@@ -539,11 +540,7 @@ def signup(
                 detail="Username already taken"
             )
 
-        hashed = pwd_context.hash(
-
-            data["password"]
-
-        )
+        hashed = hash_password(data["password"])
 
         user = User(
 
@@ -596,13 +593,7 @@ def login(
                 detail="Invalid username or password"
             )
 
-        valid = pwd_context.verify(
-
-            data["password"],
-
-            user.password
-
-        )
+        valid = verify_password(data["password"], user.password)
 
         if not valid:
 
@@ -949,7 +940,7 @@ def ask_ai_stream(
     finally:
         db.close()
 
-    embedding = get_model().model.encode(question).tolist()
+    embedding = model.encode(question).tolist()
 
     context = ""
     sources = []
@@ -978,9 +969,9 @@ def ask_ai_stream(
             score_threshold=RELEVANCE_THRESHOLD
         ).points
 
-        # print(f"[DEBUG] Hits: {len(results)}")
-        # for hit in results:
-        #     print(f"[DEBUG] score={hit.score:.4f} file={hit.payload.get('filename')} page={hit.payload.get('page_number')}")
+        print(f"[DEBUG] Hits: {len(results)}")
+        for hit in results:
+            print(f"[DEBUG] score={hit.score:.4f} file={hit.payload.get('filename')} page={hit.payload.get('page_number')}")
 
         for hit in results:
             payload = hit.payload

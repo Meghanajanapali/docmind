@@ -4,7 +4,7 @@ sqlalchemy
 psycopg2-binary
 pypdf
 python-jose[cryptography]
-passlib[bcrypt]
+bcrypt
 python-multipart
 python-dotenv
 sentence-transformers
