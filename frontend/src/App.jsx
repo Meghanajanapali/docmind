@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import ReactMarkdown from "react-markdown"
 import "./App.css"
 
-const API_BASE = "http://127.0.0.1:8000"
+const API_BASE = "https://docmind-production-83a9.up.railway.app"
 
 function App() {
 
