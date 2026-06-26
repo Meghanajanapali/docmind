@@ -11,8 +11,15 @@ load_dotenv()
 # Produces 384-dimensional vectors.
 # BAAI/bge-small-en-v1.5 — 90MB, 384-dim vectors, slightly better than
 # MiniLM while staying within Render free tier's 512MB RAM limit.
-model = SentenceTransformer("BAAI/bge-small-en-v1.5")
 VECTOR_SIZE = 384
+
+_model = None
+
+def get_model():
+    global _model
+    if _model is None:
+        _model = SentenceTransformer("BAAI/bge-small-en-v1.5")
+    return _model
 COLLECTION_NAME = "docmind"
 
 import warnings

@@ -28,7 +28,7 @@ from groq import Groq
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 import uuid
 
-from embedding import model, client as qdrant_client, COLLECTION_NAME
+from embedding import get_model, client as qdrant_client, COLLECTION_NAME
 from qdrant_client.models import Filter, FieldCondition, MatchValue, PointStruct
 import uuid as uuid_lib
 from database import SessionLocal, engine
@@ -328,7 +328,7 @@ async def upload_pdf(
 
     for index, (chunk, page_num) in enumerate(all_chunks):
 
-        embedding = model.encode(chunk).tolist()
+        embedding = get_model().model.encode(chunk).tolist()
         point_id = str(uuid_lib.uuid4())
 
         qdrant_client.upsert(
@@ -403,7 +403,7 @@ def ask_ai(
     finally:
         db.close()
 
-    embedding = model.encode(question).tolist()
+    embedding = get_model().model.encode(question).tolist()
 
     context = ""
     sources = []
@@ -949,7 +949,7 @@ def ask_ai_stream(
     finally:
         db.close()
 
-    embedding = model.encode(question).tolist()
+    embedding = get_model().model.encode(question).tolist()
 
     context = ""
     sources = []
