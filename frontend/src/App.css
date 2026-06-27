@@ -428,7 +428,9 @@ body {
 .message.ai .message-body h2,
 .message.ai .message-body h3 {
   color: #f1f5f9;
-  margin: 10px 0 6px;
+  font-size: 15px;
+  font-weight: 700;
+  margin: 8px 0 4px;
 }
 
 /* Save note button */

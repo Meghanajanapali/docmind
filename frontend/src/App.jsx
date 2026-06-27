@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from "react"
 import ReactMarkdown from "react-markdown"
 import "./App.css"
 
-const API_BASE = "https://docmind-production-83a9.up.railway.app"
-
+// const API_BASE = "https://docmind-production-74ef.up.railway.app"
+// const API_BASE = "http://127.0.0.1:8000"  // should be this for local
+const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"
 function App() {
 
   const [currentPage, setCurrentPage] = useState("home")

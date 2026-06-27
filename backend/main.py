@@ -502,13 +502,18 @@ Use markdown formatting where helpful."""
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"LLM unavailable: {e}")
 
+    # Append sources to answer before saving so they show on page refresh
+    answer_to_save = full_answer
+    if sources:
+        answer_to_save += "\n\n📄 Sources:\n" + "\n".join(sources)
+
     db = SessionLocal()
     try:
         db.add(Chat(
             user_id=user["user_id"],
             session_id=session_id,
             question=question,
-            answer=full_answer
+            answer=answer_to_save
         ))
         sess = db.query(ChatSession).filter(ChatSession.id == session_id).first()
         if sess and sess.title == "New Chat":
