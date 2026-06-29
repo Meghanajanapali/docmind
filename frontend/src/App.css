@@ -602,6 +602,20 @@ body {
 
 /* ── RESPONSIVE ─────────────────────────────────────── */
 
+/* Hide menu button on desktop */
+.menu-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid #334155;
+  color: #94a3b8;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 18px;
+  cursor: pointer;
+}
+
 /* Tablet (768px and below) */
 @media (max-width: 768px) {
 
@@ -665,16 +679,6 @@ body {
   /* Menu button to open sidebar */
   .menu-btn {
     display: flex !important;
-    align-items: center;
-    justify-content: center;
-    background: transparent;
-    border: 1px solid #334155;
-    color: #94a3b8;
-    padding: 7px 10px;
-    border-radius: 6px;
-    font-size: 18px;
-    cursor: pointer;
-    order: 0;
   }
 
   /* Upload box */
