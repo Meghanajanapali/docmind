@@ -1,5 +1,7 @@
 # 🧠 DocMind — AI-Powered Document Assistant
 
+Live at https://docmind-dusky.vercel.app
+
 DocMind is a privacy-first, full-stack RAG (Retrieval-Augmented Generation) application that lets you upload PDFs and have intelligent conversations with your documents using a fully local or cloud-hosted AI pipeline.
 
 ## ✨ Features
