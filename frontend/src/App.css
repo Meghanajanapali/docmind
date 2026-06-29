@@ -599,3 +599,163 @@ body {
 }
 
 .chip-remove:hover { color: #ef4444; }
+
+/* ── RESPONSIVE ─────────────────────────────────────── */
+
+/* Tablet (768px and below) */
+@media (max-width: 768px) {
+
+  /* Sidebar becomes a slide-in overlay */
+  .container {
+    position: relative;
+  }
+
+  .sidebar {
+    position: fixed;
+    left: -280px;
+    top: 0;
+    z-index: 100;
+    width: 260px;
+    min-width: 260px;
+    height: 100vh;
+    transition: left 0.3s ease;
+    box-shadow: 4px 0 20px rgba(0,0,0,0.4);
+  }
+
+  .sidebar.open {
+    left: 0;
+  }
+
+  /* Overlay backdrop when sidebar is open */
+  .sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 99;
+  }
+
+  .sidebar-overlay.visible {
+    display: block;
+  }
+
+  /* Main takes full width */
+  .main {
+    width: 100%;
+  }
+
+  /* Topbar */
+  .topbar {
+    padding: 10px 14px;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-height: auto;
+  }
+
+  .topbar-left {
+    order: 2;
+    width: 100%;
+  }
+
+  .topbar-actions {
+    order: 1;
+    margin-left: auto;
+  }
+
+  /* Menu button to open sidebar */
+  .menu-btn {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid #334155;
+    color: #94a3b8;
+    padding: 7px 10px;
+    border-radius: 6px;
+    font-size: 18px;
+    cursor: pointer;
+    order: 0;
+  }
+
+  /* Upload box */
+  .upload-box {
+    margin: 8px 14px;
+    padding: 10px 14px;
+  }
+
+  /* Chat box */
+  .chat-box {
+    padding: 12px 14px;
+  }
+
+  /* Messages take more width on mobile */
+  .message {
+    max-width: 92%;
+  }
+
+  /* Input row */
+  .input-row {
+    padding: 10px 14px;
+    gap: 8px;
+  }
+
+  .input-row input {
+    font-size: 14px;
+    padding: 10px 12px;
+  }
+
+  .input-row button {
+    padding: 10px 16px;
+    font-size: 14px;
+  }
+
+  /* Login box */
+  .loginBox {
+    width: 90%;
+    max-width: 380px;
+    padding: 28px 24px;
+  }
+
+  /* Dashboard */
+  .dashboardPage {
+    padding: 20px 16px;
+  }
+
+  .dashboard {
+    flex-direction: column;
+  }
+
+  .card {
+    min-width: unset;
+    width: 100%;
+    padding: 20px;
+  }
+
+  /* Topbar buttons — shorter text on mobile */
+  .topbar-btn {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+}
+
+/* Mobile (480px and below) */
+@media (max-width: 480px) {
+
+  .loginTitle { font-size: 22px; }
+  .loginLogo { font-size: 32px; }
+
+  .message-body {
+    font-size: 13px;
+    padding: 10px 13px;
+  }
+
+  .chat-empty-icon { font-size: 36px; }
+  .chat-empty p { font-size: 13px; }
+
+  .upload-hint { font-size: 12px; }
+
+  .session-doc-chip {
+    max-width: 140px;
+    font-size: 11px;
+  }
+}

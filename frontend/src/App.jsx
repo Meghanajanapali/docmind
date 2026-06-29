@@ -2,9 +2,8 @@ import { useEffect, useRef, useState } from "react"
 import ReactMarkdown from "react-markdown"
 import "./App.css"
 
-// const API_BASE = "https://docmind-production-74ef.up.railway.app"
-// const API_BASE = "http://127.0.0.1:8000"  // should be this for local
 const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"
+
 function App() {
 
   const [currentPage, setCurrentPage] = useState("home")
@@ -45,6 +44,8 @@ function App() {
     documents: true,
     chats: true
   })
+
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   const [dashboard, setDashboard] = useState({ notes: 0, documents: 0, chats: 0 })
 
@@ -323,6 +324,7 @@ function App() {
     setActiveSessionId(sessionId)
     setUploadStatus("")
     fetchSessionMessages(sessionId)
+    setSidebarOpen(false)
   }
 
   async function deleteSession(sessionId) {
@@ -469,8 +471,14 @@ function App() {
   return (
     <div className="container">
 
+      {/* Sidebar overlay for mobile */}
+      <div
+        className={`sidebar-overlay ${sidebarOpen ? "visible" : ""}`}
+        onClick={() => setSidebarOpen(false)}
+      />
+
       {/* Sidebar */}
-      <div className="sidebar">
+      <div className={`sidebar ${sidebarOpen ? "open" : ""}`}>
         <div className="sidebar-brand">
           <span className="sidebar-logo">🧠</span>
           <span className="sidebar-title">DocMind</span>
@@ -581,6 +589,13 @@ function App() {
 
         {/* Topbar */}
         <div className="topbar">
+          <button
+            className="menu-btn"
+            style={{ display: "none" }}
+            onClick={() => setSidebarOpen(true)}
+          >
+            ☰
+          </button>
           <div className="topbar-left">
             {sessionDocs.length > 0 ? (
               <div className="session-docs-bar">
